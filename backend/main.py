@@ -4,6 +4,7 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 
 app = FastAPI()
 load_dotenv()
@@ -21,13 +22,19 @@ async def health():
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    response = client.chat.completions.create(
-        model=os.getenv("LLM_MODEL"),
-        messages=[
-            {"role": "user", "content": request.question}
-        ] 
-    )
-    return {"answer": response.choices[0].message.content}
+    def generate():
+        stream = client.chat.completions.create(
+            model=os.getenv("LLM_MODEL"),
+            messages=[
+                {"role": "user", "content": request.question}
+            ],
+            stream=True
+        )
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                for char in chunk.choices[0].delta.content:
+                    yield char
+    return StreamingResponse(generate(), media_type="text/plain")
 
 if __name__ == "__main__":
     uvicorn.run(

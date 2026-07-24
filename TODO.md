@@ -3,8 +3,8 @@
 ## 项目状态
 - ✅ 工程化环境配置（Git hooks、.gitignore、.env.example）
 - ✅ 项目骨架搭建（FastAPI + Streamlit 前后端联通）
-- ✅ LLM 接入（通义千问，非流式）
-- ⬜ 流式输出（Streaming）
+- ✅ LLM 接入（通义千问，流式输出）
+- ⬜ 文档上传与 RAG
 
 ---
 
@@ -13,9 +13,9 @@
 ### Phase 2 — 接入 LLM 核心能力
 - [x] backend: 创建 `POST /chat` 接口，接收用户问题
 - [x] backend: 集成通义千问 API
-- [ ] backend: 实现流式输出（Streaming）
+- [x] backend: 实现流式输出（Streaming）
 - [x] frontend: 输入框内容发到后端
-- [ ] frontend: 流式显示 AI 回答
+- [x] frontend: 流式显示 AI 回答
 - [x] 前后端联调，跑通"提问 → AI 回答"完整链路
 
 ### Phase 3 — 文档上传与 RAG

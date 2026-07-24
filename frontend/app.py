@@ -21,12 +21,18 @@ user_question = st.text_input("此处输入问题")
 
 if st.button("发送"):
     if user_question:
-        response = requests.post(
+        with st.spinner("思考中..."):
+            response = requests.post(
             "http://localhost:8000/chat",
             json={"question": user_question},
+            stream=True,
             timeout=30
-        )
+            )
         if response.status_code == 200:
-            st.write(response.json()["answer"])
+            def stream_text():
+                for chunk in response.iter_content(chunk_size=None):
+                    if chunk:
+                        yield chunk.decode("utf-8")
+            st.write_stream(stream_text())
         else:
             st.error("请求失败")

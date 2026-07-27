@@ -22,6 +22,9 @@ env/
 .DS_Store
 Thumbs.db
 
+# Code review artifacts
+_code_review_findings.json
+
 # Project specific
 data/
 chroma_db/

@@ -1,6 +1,6 @@
-from fastapi import FastAPI, UploadFile, File
-import uvicorn
-from openai import OpenAI
+from fastapi import FastAPI, UploadFile, File  
+import uvicorn  
+from openai import OpenAI  
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -76,6 +76,32 @@ async def upload_doc(file: UploadFile = File(...)):
     )
 
     return {"filename": file.filename, "chunks": len(chunks), "status": "upload"}
+
+@app.get("/documents")
+def list_documents():
+    if not os.path.exists("data"):
+        return {"documents": []}
+    files = os.listdir("data")
+    return {"documents": files}
+
+@app.get("/documents/{filename}")
+def get_document(filename: str):
+    file_path = os.path.join("data", filename)
+    if not os.path.exists(file_path):
+        return {"error": "文件不存在"}
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return {"filename": filename, "content": content}
+
+@app.delete("/documents/{filename}")
+def delete_document(filename: str):
+    file_path = os.path.join("data", filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+    vector_store.delete(where={"source": filename})
+
+    return {"status": "delete", "filename": filename}
 
 if __name__ == "__main__":
     uvicorn.run(

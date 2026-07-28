@@ -1,5 +1,4 @@
 from fastapi import FastAPI, UploadFile, File
-import shutil
 import uvicorn
 from openai import OpenAI
 import os
@@ -38,17 +37,19 @@ async def health():
 @app.post("/chat")
 def chat(request: ChatRequest):
     def generate():
+        docs = vector_store.similarity_search(request.question, k=3)
+        context = "\n\n".join([doc.page_content for doc in docs])
         stream = client.chat.completions.create(
             model=os.getenv("LLM_MODEL"),
             messages=[
+                {"role": "system", "content": f"请基于以下文档内容回答问题: \n{context}"},
                 {"role": "user", "content": request.question}
             ],
             stream=True
         )
         for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
-                for char in chunk.choices[0].delta.content:
-                    yield char
+                yield chunk.choices[0].delta.content
     return StreamingResponse(generate(), media_type="text/plain")
 
 @app.post("/upload")

@@ -24,7 +24,9 @@
 - [x] backend: LangChain + Chroma 向量化存储
 - [x] backend: 检索增强生成（RAG 问答）
 - [x] frontend: 文档上传界面（侧边栏）
-- [ ] frontend: 知识库管理（查看/删除文档）
+- [x] backend: 文档列表 / 内容预览端点
+- [x] backend: 删除文档端点（删文件 + 删向量）
+- [x] frontend: 知识库管理（查看/删除文档）
 
 ### 代码清理
 - [x] 删除无用 import（shutil）
@@ -36,7 +38,7 @@
 - [x] 回车发送替代按钮点击
 - [x] 聊天气泡展示（用户 + AI）
 - [x] 对话历史留存（session_state）
-- [ ] 侧边栏 + 主区域布局改造
+- [x] 侧边栏 + 主区域布局改造（含欢迎页 / 文档预览三态切换）
 
 ---
 

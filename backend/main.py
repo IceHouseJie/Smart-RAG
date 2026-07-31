@@ -3,7 +3,7 @@ import uvicorn
 from openai import OpenAI  
 import os
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
@@ -18,6 +18,7 @@ client = OpenAI(
 
 class ChatRequest(BaseModel):
     question: str
+    history: list = Field(default_factory=list)
 
 embeddings = OpenAIEmbeddings(
     model = "text-embedding-v3",
@@ -39,12 +40,14 @@ def chat(request: ChatRequest):
     def generate():
         docs = vector_store.similarity_search(request.question, k=3)
         context = "\n\n".join([doc.page_content for doc in docs])
+        messages = [
+            {"role": "system", "content": f"请基于以下文档内容回答问题: \n{context}"}
+        ]
+        messages.extend(request.history)
+        messages.append({"role": "user", "content": request.question})
         stream = client.chat.completions.create(
             model=os.getenv("LLM_MODEL"),
-            messages=[
-                {"role": "system", "content": f"请基于以下文档内容回答问题: \n{context}"},
-                {"role": "user", "content": request.question}
-            ],
+            messages=messages,
             stream=True
         )
         for chunk in stream:

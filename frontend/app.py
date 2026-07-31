@@ -85,7 +85,7 @@ if user_question:
     with st.spinner("思考中..."):
         response = requests.post(
         "http://localhost:8000/chat",
-        json={"question": user_question},
+        json={"question": user_question, "history": st.session_state.messages[:-1]},
         stream=True,
         timeout=30
         )

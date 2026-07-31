@@ -99,8 +99,11 @@ if user_question:
             for chunk in response.iter_content(chunk_size=None):
                 if chunk:
                     yield chunk.decode("utf-8")
-        with st.chat_message("assistant"):
-            full_response = st.write_stream(stream_text())
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+        try:
+            with st.chat_message("assistant"):
+                full_response = st.write_stream(stream_text())
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+        except Exception:
+            st.error("网络中断或 AI 服务异常，请重试")
     else:
         st.error("请求失败")

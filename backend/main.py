@@ -43,14 +43,18 @@ def rewrite_query(question: str, history: list) -> str:
     history_text = "\n".join(
         [f"{msg['role']}: {msg['content']}" for msg in history]
     )
-    resp = client.chat.completions.create(
-        model=os.getenv("LLM_MODEL"),
-        messages=[
-            {"role": "system", "content": "你是检索查询改写助手。根据对话历史，把用户的新问题改写成独立、完整的检索问题，使其不依赖历史也能直接检索到相关内容。只输出改写后的问题，不要任何解释。"},
-            {"role": "user", "content": f"历史对话：\n{history_text}\n\n新问题：{question}\n\n改写后的问题："}
-        ]
-    )
-    return resp.choices[0].message.content.strip()
+    try:
+        resp = client.chat.completions.create(
+            model=os.getenv("LLM_MODEL"),
+            messages=[
+                {"role": "system", "content": "你是检索查询改写助手。根据对话历史，把用户的新问题改写成独立、完整的检索问题，使其不依赖历史也能直接检索到相关内容。只输出改写后的问题，不要任何解释。"},
+                {"role": "user", "content": f"历史对话：\n{history_text}\n\n新问题：{question}\n\n改写后的问题："}
+            ]
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception:
+        # 改写失败时降级为原始问题，保证主链路不中断
+        return question
 
 @app.post("/chat")
 def chat(request: ChatRequest):
@@ -66,14 +70,17 @@ def chat(request: ChatRequest):
         ]
         messages.extend(request.history)
         messages.append({"role": "user", "content": request.question})
-        stream = client.chat.completions.create(
-            model=os.getenv("LLM_MODEL"),
-            messages=messages,
-            stream=True
-        )
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+        try:
+            stream = client.chat.completions.create(
+                model=os.getenv("LLM_MODEL"),
+                messages=messages,
+                stream=True
+            )
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except Exception:
+            yield "AI 服务暂时不可用，请稍后重试。"
     return StreamingResponse(generate(), media_type="text/plain")
 
 @app.post("/upload")
@@ -89,6 +96,7 @@ async def upload_doc(file: UploadFile = File(...)):
 
     filename = os.path.basename(file.filename)
     file_path = f"data/{filename}"
+    os.makedirs("data", exist_ok=True)
     with open(file_path,"wb") as f:
         f.write(content)
 

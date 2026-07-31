@@ -2,23 +2,33 @@ from fastapi import FastAPI, UploadFile, File
 import uvicorn  
 from openai import OpenAI  
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+from typing import Literal
 from fastapi.responses import StreamingResponse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+CHROMA_DIR = BASE_DIR / "chroma_db"
+
 app = FastAPI()
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 client = OpenAI(
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url=os.getenv("DASHSCOPE_BASE_URL")
 )
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant", "system"]
+    content: str
+
 class ChatRequest(BaseModel):
     question: str
-    history: list = Field(default_factory=list)
+    history: list[ChatMessage] = Field(default_factory=list)
 
 embeddings = OpenAIEmbeddings(
     model = "text-embedding-v3",
@@ -28,7 +38,7 @@ embeddings = OpenAIEmbeddings(
 )
 vector_store = Chroma(
     embedding_function=embeddings,
-    persist_directory="chroma_db"
+    persist_directory=str(CHROMA_DIR)
 )
 
 @app.get("/health")
@@ -41,7 +51,7 @@ def rewrite_query(question: str, history: list) -> str:
         return question
 
     history_text = "\n".join(
-        [f"{msg['role']}: {msg['content']}" for msg in history]
+        [f"{msg.role}: {msg.content}" for msg in history]
     )
     try:
         resp = client.chat.completions.create(
@@ -68,7 +78,7 @@ def chat(request: ChatRequest):
         messages = [
             {"role": "system", "content": f"请基于以下文档内容回答问题: \n{context}"}
         ]
-        messages.extend(request.history)
+        messages.extend([msg.model_dump() for msg in request.history])
         messages.append({"role": "user", "content": request.question})
         try:
             stream = client.chat.completions.create(
@@ -95,9 +105,9 @@ async def upload_doc(file: UploadFile = File(...)):
         return {"error": "程序读取文档失败,请上传正确格式的文档.", "status": "error"}
 
     filename = os.path.basename(file.filename)
-    file_path = f"data/{filename}"
-    os.makedirs("data", exist_ok=True)
-    with open(file_path,"wb") as f:
+    file_path = DATA_DIR / filename
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(file_path, "wb") as f:
         f.write(content)
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50)
@@ -114,15 +124,15 @@ async def upload_doc(file: UploadFile = File(...)):
 
 @app.get("/documents")
 def list_documents():
-    if not os.path.exists("data"):
+    if not DATA_DIR.exists():
         return {"documents": []}
-    files = os.listdir("data")
+    files = os.listdir(DATA_DIR)
     return {"documents": files}
 
 @app.get("/documents/{filename}")
 def get_document(filename: str):
-    file_path = os.path.join("data", filename)
-    if not os.path.exists(file_path):
+    file_path = DATA_DIR / filename
+    if not file_path.exists():
         return {"error": "文件不存在"}
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -130,9 +140,9 @@ def get_document(filename: str):
 
 @app.delete("/documents/{filename}")
 def delete_document(filename: str):
-    file_path = os.path.join("data", filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    file_path = DATA_DIR / filename
+    if file_path.exists():
+        file_path.unlink()
 
     vector_store.delete(where={"source": filename})
 

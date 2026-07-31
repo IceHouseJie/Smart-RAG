@@ -35,10 +35,28 @@ vector_store = Chroma(
 async def health():
     return {"state":"ok"}
 
+def rewrite_query(question: str, history: list) -> str:
+    """根据对话历史，把用户问题改写成自包含的检索问题。无历史时原样返回。"""
+    if not history:
+        return question
+
+    history_text = "\n".join(
+        [f"{msg['role']}: {msg['content']}" for msg in history]
+    )
+    resp = client.chat.completions.create(
+        model=os.getenv("LLM_MODEL"),
+        messages=[
+            {"role": "system", "content": "你是检索查询改写助手。根据对话历史，把用户的新问题改写成独立、完整的检索问题，使其不依赖历史也能直接检索到相关内容。只输出改写后的问题，不要任何解释。"},
+            {"role": "user", "content": f"历史对话：\n{history_text}\n\n新问题：{question}\n\n改写后的问题："}
+        ]
+    )
+    return resp.choices[0].message.content.strip()
+
 @app.post("/chat")
 def chat(request: ChatRequest):
     def generate():
-        docs = vector_store.similarity_search(request.question, k=3)
+        search_query = rewrite_query(request.question, request.history)
+        docs = vector_store.similarity_search(search_query, k=3)
         context = "\n\n".join([doc.page_content for doc in docs])
         messages = [
             {"role": "system", "content": f"请基于以下文档内容回答问题: \n{context}"}

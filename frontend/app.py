@@ -17,11 +17,15 @@ with st.sidebar:
 
     upload_file = st.file_uploader("上传文档", type=["txt"])
 
-    if upload_file is not None:
+    if "uploaded_files" not in st.session_state:
+        st.session_state.uploaded_files = set()
+
+    if upload_file is not None and upload_file.name not in st.session_state.uploaded_files:
         files = {"file": (upload_file.name, upload_file.getvalue(), "text/plain")}
         resp = requests.post("http://localhost:8000/upload", files=files)
         if resp.status_code == 200:
             result = resp.json()
+            st.session_state.uploaded_files.add(upload_file.name)
             st.toast(f"上传成功: {result['filename']}({result['chunks']}个片段) ")
         else:
             st.toast("上传失败")
@@ -40,6 +44,7 @@ with st.sidebar:
                 with col2:
                     if st.button("🗑️", key=f"del_{doc}"):
                         requests.delete(f"http://localhost:8000/documents/{doc}")
+                        st.session_state.uploaded_files.discard(doc)
                         st.rerun()
 
 

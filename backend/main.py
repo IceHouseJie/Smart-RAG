@@ -57,6 +57,9 @@ def chat(request: ChatRequest):
     def generate():
         search_query = rewrite_query(request.question, request.history)
         docs = vector_store.similarity_search(search_query, k=3)
+        if not docs:
+            yield "知识库中暂未检索到相关内容，请先上传相关文档后再提问。"
+            return
         context = "\n\n".join([doc.page_content for doc in docs])
         messages = [
             {"role": "system", "content": f"请基于以下文档内容回答问题: \n{context}"}
@@ -84,19 +87,22 @@ async def upload_doc(file: UploadFile = File(...)):
     except UnicodeDecodeError:
         return {"error": "程序读取文档失败,请上传正确格式的文档.", "status": "error"}
 
-    file_path = f"data/{file.filename}"
+    filename = os.path.basename(file.filename)
+    file_path = f"data/{filename}"
     with open(file_path,"wb") as f:
         f.write(content)
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50)
     chunks = splitter.split_text(text)
 
+    # 先删该文件的旧向量，再加新向量（幂等：同名文件重复上传不叠加）
+    vector_store.delete(where={"source": filename})
     vector_store.add_texts(
         texts=chunks,
-        metadatas=[{"source": file.filename} for _ in chunks]
+        metadatas=[{"source": filename} for _ in chunks]
     )
 
-    return {"filename": file.filename, "chunks": len(chunks), "status": "upload"}
+    return {"filename": filename, "chunks": len(chunks), "status": "upload"}
 
 @app.get("/documents")
 def list_documents():

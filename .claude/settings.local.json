@@ -1,7 +1,0 @@
-{
-  "skillOverrides": {
-    "computer-use": "off",
-    "orca-cli": "off",
-    "orchestration": "off"
-  }
-}

@@ -5,6 +5,7 @@ import uvicorn
 from openai import OpenAI
 import os
 from pathlib import Path
+from io import BytesIO
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import Literal
@@ -12,6 +13,8 @@ from fastapi.responses import StreamingResponse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -224,20 +227,40 @@ def delete_session_api(session_id: int):
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"status": "deleted", "id": session_id}
 
+ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
+
+def is_allowed_extension(filename: str) -> bool:
+    """文件名后缀是否属于支持格式（忽略大小写，兼容 .PDF）。"""
+    return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
+
+def extract_text(filename: str, content: bytes) -> str:
+    """按扩展名把原始字节提取为纯文本；上传与文档预览共用。"""
+    if Path(filename).suffix.lower() == ".pdf":
+        reader = PdfReader(BytesIO(content))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    return content.decode("utf-8")
+
 @app.post("/upload")
 async def upload_doc(file: UploadFile = File(...)):
     content = await file.read()
     if not content:
         return {"error": "文件内容为空", "status": "empty"}
 
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        return {"error": "程序读取文档失败,请上传正确格式的文档.", "status": "error"}
-
     filename = os.path.basename(file.filename)
-    file_path = DATA_DIR / filename
+    if not is_allowed_extension(filename):
+        return {"error": f"不支持的文件格式，仅支持 {'/'.join(sorted(ALLOWED_EXTENSIONS))}", "status": "error"}
+
+    # 先提取文本再落盘：校验先于副作用，坏文件不残留
+    try:
+        text = extract_text(filename, content)
+    except (UnicodeDecodeError, PdfReadError):
+        return {"error": "程序读取文档失败，请检查文件是否损坏或已加密。", "status": "error"}
+
+    if not text.strip():
+        return {"error": "未能从文档中提取到文本（图片型 PDF / 扫描件需 OCR，暂不支持）", "status": "error"}
+
     os.makedirs(DATA_DIR, exist_ok=True)
+    file_path = DATA_DIR / filename
     with open(file_path, "wb") as f:
         f.write(content)
 
@@ -257,24 +280,26 @@ async def upload_doc(file: UploadFile = File(...)):
 def list_documents():
     if not DATA_DIR.exists():
         return {"documents": []}
-    # 只暴露上传的 txt，避免 conversations.db 等运行时文件被文档管理接口读到/删除
-    files = [f for f in os.listdir(DATA_DIR) if f.endswith(".txt")]
-    return {"documents": files}
+    # 只暴露上传的文档，避免 conversations.db 等运行时文件被文档管理接口读到/删除
+    return {"documents": [f for f in os.listdir(DATA_DIR) if is_allowed_extension(f)]}
 
 @app.get("/documents/{filename}")
 def get_document(filename: str):
-    if not filename.endswith(".txt"):
+    if not is_allowed_extension(filename):
         raise HTTPException(status_code=404, detail="文件不存在")
     file_path = DATA_DIR / filename
     if not file_path.exists():
         return {"error": "文件不存在"}
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    return {"filename": filename, "content": content}
+    try:
+        with open(file_path, "rb") as f:
+            text = extract_text(filename, f.read())
+    except (UnicodeDecodeError, PdfReadError):
+        return {"error": "文档读取失败，请删除后重新上传"}
+    return {"filename": filename, "content": text}
 
 @app.delete("/documents/{filename}")
 def delete_document(filename: str):
-    if not filename.endswith(".txt"):
+    if not is_allowed_extension(filename):
         raise HTTPException(status_code=404, detail="文件不存在")
     file_path = DATA_DIR / filename
     if file_path.exists():

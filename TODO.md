@@ -57,12 +57,11 @@
 - [x] 前端流式中断异常处理（断网显示错误而非红屏）
 - [x] history 数据校验（Pydantic 模型 + Literal，畸形数据 422）
 - [x] 路径锚定 BASE_DIR（chroma_db / data / .env 不依赖启动目录）
-- [ ] 前端实测（上传 toast 单次 / 断网提示 / 重传同名文件）
+- [x] 前端实测（上传 toast 单次 / 断网提示 / 重传同名文件）
 
 ## v2.0 — 功能扩展
-- [ ] 多模型支持（OpenAI / 通义千问可切换）
 - [x] 对话历史管理（保存/查看历史对话）
-- [x] 支持更多文档格式（PDF、Markdown）
+- [x] 支持更多文档格式（PDF、Markdown、DOCX）
 
 ## v3.0 — 工程化
 - [ ] Docker Compose 一键启动（FastAPI + Chroma + Streamlit）

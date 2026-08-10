@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    env_file:
+      - .env          # 注入 DASHSCOPE_API_KEY 等，不把 .env 打进镜像
+    volumes:
+      - data_volume:/app/data        # SQLite + 上传文档持久化
+      - chroma_volume:/app/chroma_db # 向量库持久化
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    environment:
+      API_BASE_URL: http://backend:8000  # 容器内走服务名，不是 localhost
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+
+volumes:
+  data_volume:
+  chroma_volume:

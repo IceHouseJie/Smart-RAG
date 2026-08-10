@@ -1,0 +1,11 @@
+.venv/
+.git/
+.claude/
+.githooks/
+scripts/
+data/
+chroma_db/
+__pycache__/
+*.pyc
+.env
+_code_review_findings.json

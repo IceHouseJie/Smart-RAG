@@ -1,7 +1,9 @@
+import os
 import streamlit as st
 import requests
 
-API = "http://localhost:8000"
+# 本地开发默认连 localhost；Docker 里由 compose 注入 http://backend:8000
+API = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
 def _load_session(session_id: int):

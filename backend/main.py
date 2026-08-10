@@ -38,13 +38,29 @@ def _make_title(question: str) -> str:
 
 
 def _extract_document_text(filename: str, content: bytes) -> str:
-    """提取文档文本；PDF 无文字层（扫描件）时回退视觉模型。"""
+    """提取文档文本；PDF 无文字层（扫描件）时回退整页视觉；有文字的文档则识别嵌入图片。"""
     text = parsers.extract_text(filename, content)
-    if text.strip():
-        return text
-    if Path(filename).suffix.lower() == ".pdf":
+    suffix = Path(filename).suffix.lower()
+
+    if suffix == ".pdf" and not text.strip():
+        # 扫描件（整页无文字）：渲染每页走视觉
         return llm.vision_extract_text(parsers.render_pdf_pages(content))
+
+    # 有文字的文档：识别嵌入图片（如果有）
+    images = parsers.extract_embedded_images(filename, content)
+    if images:
+        vision_text = llm.vision_extract_text(images)
+        if vision_text.strip():
+            return f"{text}\n\n{vision_text}" if text.strip() else vision_text
     return text
+
+
+# 提取文本缓存：上传时保存，预览直接读，避免每次预览重复视觉识别
+EXTRACTED_DIR = config.DATA_DIR / ".extracted"
+
+
+def _sidecar_path(filename: str) -> Path:
+    return EXTRACTED_DIR / f"{filename}.txt"
 
 
 db.init_db()  # 启动时建表（幂等）
@@ -154,6 +170,10 @@ async def upload_doc(file: UploadFile = File(...)):
     with open(file_path, "wb") as f:
         f.write(content)
 
+    # 缓存提取文本：预览直接读缓存，不再重复视觉识别
+    EXTRACTED_DIR.mkdir(exist_ok=True)
+    _sidecar_path(filename).write_text(text, encoding="utf-8")
+
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.split_text(text)
 
@@ -182,6 +202,10 @@ def get_document(filename: str):
     file_path = config.DATA_DIR / filename
     if not file_path.exists():
         return {"error": "文件不存在"}
+    # 优先读提取缓存（上传时保存），避免预览重复视觉识别
+    sidecar = _sidecar_path(filename)
+    if sidecar.exists():
+        return {"filename": filename, "content": sidecar.read_text(encoding="utf-8")}
     try:
         with open(file_path, "rb") as f:
             text = _extract_document_text(filename, f.read())
@@ -197,6 +221,7 @@ def delete_document(filename: str):
     file_path = config.DATA_DIR / filename
     if file_path.exists():
         file_path.unlink()
+    _sidecar_path(filename).unlink(missing_ok=True)
 
     llm.vector_store.delete(where={"source": filename})
 

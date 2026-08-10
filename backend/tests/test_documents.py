@@ -1,5 +1,7 @@
 """/upload 与 /documents 端点的 API 测试。"""
 
+import main
+
 
 def _upload(app_env, name, content, mime="text/plain"):
     return app_env.client.post("/upload", files={"file": (name, content, mime)})
@@ -75,3 +77,22 @@ def test_delete_document_removes_file_and_vector(app_env):
 def test_delete_document_not_allowed_returns_404(app_env):
     resp = app_env.client.delete("/documents/conversations.db")
     assert resp.status_code == 404
+
+
+def test_upload_creates_sidecar_and_preview_reads_cache(app_env, monkeypatch):
+    _upload(app_env, "a.txt", b"hello content")
+    sidecar = main._sidecar_path("a.txt")
+    assert sidecar.exists()
+    assert sidecar.read_text(encoding="utf-8") == "hello content"
+
+    # 预览应读缓存，不重新提取（若重新提取则抛异常）
+    monkeypatch.setattr(main, "_extract_document_text",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("不应重新提取")))
+    resp = app_env.client.get("/documents/a.txt")
+    assert resp.json()["content"] == "hello content"
+
+
+def test_delete_removes_sidecar(app_env):
+    _upload(app_env, "a.txt", b"hello")
+    app_env.client.delete("/documents/a.txt")
+    assert not main._sidecar_path("a.txt").exists()

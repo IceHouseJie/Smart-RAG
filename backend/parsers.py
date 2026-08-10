@@ -43,3 +43,27 @@ def render_pdf_pages(content: bytes) -> list:
         pix = page.get_pixmap(dpi=200)
         pages.append(pix.tobytes("png"))
     return pages
+
+
+def extract_embedded_images(filename: str, content: bytes) -> list:
+    """提取文档内嵌图片字节（PDF 用 pymupdf，DOCX 用 zipfile），无则返回 []。"""
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".pdf":
+        import pymupdf
+
+        doc = pymupdf.open(stream=content, filetype="pdf")
+        xrefs = set()
+        for page in doc:
+            for img in page.get_images(full=True):
+                xrefs.add(img[0])  # 同一图被多页引用会重复，按 xref 去重
+        return [doc.extract_image(x)["image"] for x in xrefs]
+    if suffix == ".docx":
+        import zipfile
+
+        with zipfile.ZipFile(BytesIO(content)) as z:
+            return [
+                z.read(n)
+                for n in z.namelist()
+                if n.startswith("word/media/") and not n.endswith("/")
+            ]
+    return []

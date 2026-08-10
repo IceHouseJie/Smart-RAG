@@ -1,4 +1,5 @@
 import os
+import urllib.parse
 import streamlit as st
 import requests
 
@@ -38,10 +39,10 @@ def _new_chat():
     st.rerun()
 
 
-def _get_json(url: str, default=None):
+def _get_json(url: str, default=None, timeout: int = 5):
     """GET 一个 JSON 端点；后端不可用或非 200 时返回 default，不抛异常。"""
     try:
-        resp = requests.get(url, timeout=5)
+        resp = requests.get(url, timeout=timeout)
         return resp.json() if resp.status_code == 200 else default
     except requests.exceptions.RequestException:
         return default
@@ -104,7 +105,7 @@ with st.sidebar:
         with col2:
             if st.button("🗑️", key=f"del_{doc}"):
                 try:
-                    requests.delete(f"{API}/documents/{doc}", timeout=5)
+                    requests.delete(f"{API}/documents/{urllib.parse.quote(doc)}", timeout=5)
                 except requests.exceptions.RequestException:
                     pass  # 后端不可用时忽略删除
                 st.session_state.uploaded_files.discard(doc)
@@ -136,7 +137,7 @@ if "selected_doc" in st.session_state:
         del st.session_state.selected_doc
         st.rerun()
     st.markdown(f"## {st.session_state.selected_doc}")
-    data = _get_json(f"{API}/documents/{st.session_state.selected_doc}")
+    data = _get_json(f"{API}/documents/{urllib.parse.quote(st.session_state.selected_doc)}", timeout=30)
     if data is None:
         st.error("无法连接后端服务，请确认后端已启动")
     elif data.get("error"):

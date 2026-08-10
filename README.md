@@ -5,7 +5,7 @@
 ## ✨ 功能特性
 
 - 📄 **多格式文档**：TXT / Markdown / PDF / DOCX
-- 👁️ **扫描件识别**：图片型 PDF 走视觉模型（qwen-vl）看图提取内容，图表 / 版式也能理解
+- 👁️ **图片识别**：扫描件 PDF + 文档内嵌图片（PDF/DOCX 插图）都走视觉模型（qwen-vl）看图提取内容，图表 / 版式也能理解
 - 🔍 **RAG 问答**：文档切片向量化，检索增强，回答基于知识库内容而非自由发挥
 - 💬 **多轮对话**：上下文记忆 + 查询改写，可自然追问
 - 🗂️ **对话历史管理**：SQLite 持久化，会话保存 / 查看 / 删除
@@ -18,7 +18,7 @@
 |---|---|
 | 后端 | FastAPI + Uvicorn + Pydantic |
 | AI | LangChain + Chroma + OpenAI SDK（通义千问 DashScope 兼容接口）+ qwen-vl 视觉模型 |
-| 文档解析 | pypdf（PDF）+ python-docx（DOCX）+ pymupdf（扫描件渲染） |
+| 文档解析 | pypdf（PDF）+ python-docx（DOCX）+ pymupdf（扫描件渲染 / 嵌入图片提取） |
 | 存储 | SQLite（对话历史）+ Chroma（向量库） |
 | 前端 | Streamlit |
 | 部署 | Docker Compose |
@@ -57,7 +57,7 @@ docker compose up -d
 ### 运行测试
 
 ```bash
-cd backend && ../.venv/bin/python -m pytest tests/ -v   # 34 个用例
+cd backend && ../.venv/bin/python -m pytest tests/ -v   # 41 个用例
 ```
 
 ## ⚙️ 环境变量（`.env`）
@@ -67,7 +67,7 @@ cd backend && ../.venv/bin/python -m pytest tests/ -v   # 34 个用例
 | `DASHSCOPE_API_KEY` | 通义千问 DashScope API Key（必填） |
 | `DASHSCOPE_BASE_URL` | DashScope 兼容接口地址 |
 | `LLM_MODEL` | 模型名（如 `qwen-plus`） |
-| `VISION_MODEL` | 扫描件视觉模型（如 `qwen-vl-plus`） |
+| `VISION_MODEL` | 视觉模型（扫描件 + 嵌入图片，如 `qwen-vl-plus`） |
 
 > 前端 `API_BASE_URL`：本地开发默认 `http://localhost:8000`；Docker 里由 compose 设为 `http://backend:8000`，无需手动配置。
 
@@ -78,9 +78,9 @@ backend/
   main.py      FastAPI 路由层
   config.py    路径与环境配置
   db.py        SQLite 对话历史（sessions/messages）
-  parsers.py   文档解析（txt/md/pdf/docx + 扫描件渲染）
+  parsers.py   文档解析（txt/md/pdf/docx + 扫描件渲染 + 嵌入图片提取）
   llm.py       AI 基础设施（client / 向量库 / 查询改写 / 视觉识别）
-  tests/       pytest 测试（34 用例）
+  tests/       pytest 测试（41 用例）
 frontend/
   app.py       Streamlit 界面
 Dockerfile          多阶段构建（backend / frontend 双 target）
@@ -93,5 +93,5 @@ requirements.txt
 - ✅ **v1.0** — RAG 问答全链路跑通
 - ✅ **v1.1** — 多轮记忆、查询改写、Bug 修复与前端实测
 - ✅ **v2.0** — 对话历史管理 + 多文档格式（PDF / Markdown / DOCX）
-- ✅ **v3.0** — 单元测试（34 用例）、代码重构（五模块）、Docker 部署
-- ✅ **附加** — 扫描件 PDF 识别（视觉模型 qwen-vl）
+- ✅ **v3.0** — 单元测试（41 用例）、代码重构（五模块）、Docker 部署
+- ✅ **附加** — 视觉识别：扫描件 PDF + 文档内嵌图片都进知识库（qwen-vl）

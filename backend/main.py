@@ -6,6 +6,7 @@ from openai import OpenAI
 import os
 from pathlib import Path
 from io import BytesIO
+from zipfile import BadZipFile
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import Literal
@@ -15,6 +16,7 @@ from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
+from docx import Document
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -227,7 +229,7 @@ def delete_session_api(session_id: int):
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"status": "deleted", "id": session_id}
 
-ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
+ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
 
 def is_allowed_extension(filename: str) -> bool:
     """文件名后缀是否属于支持格式（忽略大小写，兼容 .PDF）。"""
@@ -235,9 +237,19 @@ def is_allowed_extension(filename: str) -> bool:
 
 def extract_text(filename: str, content: bytes) -> str:
     """按扩展名把原始字节提取为纯文本；上传与文档预览共用。"""
-    if Path(filename).suffix.lower() == ".pdf":
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".pdf":
         reader = PdfReader(BytesIO(content))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if suffix == ".docx":
+        doc = Document(BytesIO(content))
+        parts = [p.text for p in doc.paragraphs if p.text.strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells]
+                if any(cells):
+                    parts.append(" | ".join(cells))
+        return "\n".join(parts)
     return content.decode("utf-8")
 
 @app.post("/upload")
@@ -253,7 +265,7 @@ async def upload_doc(file: UploadFile = File(...)):
     # 先提取文本再落盘：校验先于副作用，坏文件不残留
     try:
         text = extract_text(filename, content)
-    except (UnicodeDecodeError, PdfReadError):
+    except (UnicodeDecodeError, PdfReadError, BadZipFile, KeyError):
         return {"error": "程序读取文档失败，请检查文件是否损坏或已加密。", "status": "error"}
 
     if not text.strip():
@@ -293,7 +305,7 @@ def get_document(filename: str):
     try:
         with open(file_path, "rb") as f:
             text = extract_text(filename, f.read())
-    except (UnicodeDecodeError, PdfReadError):
+    except (UnicodeDecodeError, PdfReadError, BadZipFile, KeyError):
         return {"error": "文档读取失败，请删除后重新上传"}
     return {"filename": filename, "content": text}
 

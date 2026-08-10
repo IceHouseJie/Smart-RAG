@@ -48,7 +48,7 @@ with st.sidebar:
     except requests.exceptions.ConnectionError:
         st.badge("后端未启动,请联系管理员!", icon=":material/close:", color="red")
 
-    upload_file = st.file_uploader("上传文档", type=["txt", "md", "pdf"])
+    upload_file = st.file_uploader("上传文档", type=["txt", "md", "pdf", "docx"])
 
     if "uploaded_files" not in st.session_state:
         st.session_state.uploaded_files = set()
@@ -131,7 +131,7 @@ else:
         3. 🤖 AI 将基于你的知识库回答
 
         ---
-        *支持格式：TXT / Markdown / PDF*
+        *支持格式：TXT / Markdown / PDF / DOCX*
         """)
     else:
         for msg in st.session_state.messages:

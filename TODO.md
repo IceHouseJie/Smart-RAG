@@ -66,7 +66,7 @@
 ## v3.0 — 工程化
 - [ ] Docker Compose 一键启动（FastAPI + Chroma + Streamlit）
 - [x] 单元测试 + API 测试
-- [ ] 代码重构（Clean Code 准则）
+- [x] 代码重构（Clean Code 准则）
 - [ ] README 美化
 
 ---

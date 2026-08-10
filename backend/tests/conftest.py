@@ -20,6 +20,9 @@ os.environ.setdefault("DASHSCOPE_BASE_URL", "https://test.example/v1")
 os.environ.setdefault("LLM_MODEL", "test-model")
 
 import main
+import config
+import db
+import llm
 
 
 class FakeVectorStore:
@@ -79,14 +82,14 @@ class FakeClient:
 @pytest.fixture
 def app_env(tmp_path, monkeypatch):
     """把后端隔离到临时 DB / data 目录 + 假向量库 + 假 LLM，返回 TestClient 等。"""
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "test.db")
-    monkeypatch.setattr(main, "DATA_DIR", tmp_path / "data")
-    monkeypatch.setattr(main, "vector_store", FakeVectorStore())
-    monkeypatch.setattr(main, "client", FakeClient())
-    main.init_db()  # 在临时 DB 建表
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr(llm, "vector_store", FakeVectorStore())
+    monkeypatch.setattr(llm, "client", FakeClient())
+    db.init_db()  # 在临时 DB 建表
     return SimpleNamespace(
         client=TestClient(main.app),
-        vector_store=main.vector_store,
-        llm=main.client,
-        data_dir=main.DATA_DIR,
+        vector_store=llm.vector_store,
+        llm=llm.client,
+        data_dir=config.DATA_DIR,
     )

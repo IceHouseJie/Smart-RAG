@@ -1,5 +1,6 @@
 """/chat 端点的测试：空库短路、流式落库、404、LLM 降级、追问持久化。"""
 
+import db
 import main
 
 
@@ -14,7 +15,7 @@ def test_chat_empty_kb(app_env):
     sid = int(resp.headers["X-Session-Id"])
 
     # 空库短路也落库一轮（user + assistant）
-    msgs = main.get_messages(sid)
+    msgs = db.get_messages(sid)
     assert [m["role"] for m in msgs] == ["user", "assistant"]
     assert msgs[0]["content"] == "你好"
     assert msgs[1]["content"] == main.EMPTY_KB_MESSAGE
@@ -27,7 +28,7 @@ def test_chat_with_docs_streams_answer(app_env):
     assert app_env.llm.stream_answer in resp.text
 
     sid = int(resp.headers["X-Session-Id"])
-    assert main.get_messages(sid)[-1]["content"] == app_env.llm.stream_answer
+    assert db.get_messages(sid)[-1]["content"] == app_env.llm.stream_answer
 
 
 def test_chat_stale_session_404(app_env):
@@ -43,7 +44,7 @@ def test_chat_llm_fallback(app_env):
 
     sid = int(resp.headers["X-Session-Id"])
     # 降级文案也落库，且 user 消息仍在
-    msgs = main.get_messages(sid)
+    msgs = db.get_messages(sid)
     assert msgs[-1]["content"] == main.LLM_FALLBACK_MESSAGE
     assert msgs[0]["content"] == "问"
 
@@ -55,7 +56,7 @@ def test_chat_followup_persists_two_turns(app_env):
     resp2 = app_env.client.post("/chat", json={"question": "第二问", "session_id": sid})
     assert resp2.status_code == 200
 
-    msgs = main.get_messages(sid)
+    msgs = db.get_messages(sid)
     assert len(msgs) == 4  # 两轮 = 4 条
     assert [m["content"] for m in msgs] == [
         "第一问",

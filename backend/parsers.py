@@ -1,0 +1,33 @@
+"""文档格式解析：扩展名校验 + 文本提取（纯函数，无外部依赖）。"""
+
+from pathlib import Path
+from io import BytesIO
+from zipfile import BadZipFile
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
+from docx import Document
+
+ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
+
+
+def is_allowed_extension(filename: str) -> bool:
+    """文件名后缀是否属于支持格式（忽略大小写，兼容 .PDF）。"""
+    return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
+
+
+def extract_text(filename: str, content: bytes) -> str:
+    """按扩展名把原始字节提取为纯文本；上传与文档预览共用。"""
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".pdf":
+        reader = PdfReader(BytesIO(content))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if suffix == ".docx":
+        doc = Document(BytesIO(content))
+        parts = [p.text for p in doc.paragraphs if p.text.strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells]
+                if any(cells):
+                    parts.append(" | ".join(cells))
+        return "\n".join(parts)
+    return content.decode("utf-8")

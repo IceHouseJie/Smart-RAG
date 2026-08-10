@@ -1,179 +1,65 @@
-import sqlite3
-from contextlib import closing
-from fastapi import FastAPI, UploadFile, File, HTTPException
-import uvicorn
-from openai import OpenAI
+"""FastAPI 应用：路由层。逻辑分散在 config / db / parsers / llm 模块。"""
+
 import os
-from pathlib import Path
-from io import BytesIO
+import uvicorn
 from zipfile import BadZipFile
-from dotenv import load_dotenv
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Literal
-from fastapi.responses import StreamingResponse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
-from pypdf import PdfReader
 from pypdf.errors import PdfReadError
-from docx import Document
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-CHROMA_DIR = BASE_DIR / "chroma_db"
+import config
+import db
+import parsers
+import llm
 
 app = FastAPI()
-load_dotenv(BASE_DIR / ".env")
-client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url=os.getenv("DASHSCOPE_BASE_URL")
-)
+
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
 
+
 class ChatRequest(BaseModel):
     question: str
     session_id: int | None = None
 
-embeddings = OpenAIEmbeddings(
-    model = "text-embedding-v3",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url=os.getenv("DASHSCOPE_BASE_URL"),
-    check_embedding_ctx_length=False
-)
-vector_store = Chroma(
-    embedding_function=embeddings,
-    persist_directory=str(CHROMA_DIR)
-)
-
-# ---------- 对话历史持久化（SQLite） ----------
-DB_PATH = DATA_DIR / "conversations.db"
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS sessions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    title      TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-    content    TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id);
-"""
-
-def _connect() -> sqlite3.Connection:
-    """每操作开新连接：FastAPI 同步端点跑线程池，共享连接会触发 check_same_thread 错误。"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")  # 默认 OFF，不设则删会话不级联删消息
-    return conn
-
-def init_db():
-    DATA_DIR.mkdir(exist_ok=True)
-    with closing(_connect()) as conn:
-        conn.executescript(SCHEMA)
-
-def create_session(title: str) -> int:
-    with closing(_connect()) as conn, conn:
-        cur = conn.execute("INSERT INTO sessions (title) VALUES (?)", (title,))
-        return cur.lastrowid
-
-def get_session(session_id: int) -> sqlite3.Row | None:
-    with closing(_connect()) as conn:
-        return conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-
-def list_sessions() -> list:
-    with closing(_connect()) as conn:
-        return conn.execute(
-            "SELECT * FROM sessions ORDER BY updated_at DESC, id DESC"
-        ).fetchall()
-
-def get_messages(session_id: int) -> list:
-    with closing(_connect()) as conn:
-        return conn.execute(
-            "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC",
-            (session_id,),
-        ).fetchall()
-
-def delete_session(session_id: int) -> bool:
-    with closing(_connect()) as conn, conn:
-        cur = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-        return cur.rowcount > 0
-
-def insert_turn(session_id: int, user_content: str, assistant_content: str):
-    """一个事务写入一轮（user + assistant）并刷新会话时间，保证 all-or-nothing。"""
-    with closing(_connect()) as conn, conn:
-        conn.execute(
-            "INSERT INTO messages (session_id, role, content) VALUES (?, 'user', ?)",
-            (session_id, user_content),
-        )
-        conn.execute(
-            "INSERT INTO messages (session_id, role, content) VALUES (?, 'assistant', ?)",
-            (session_id, assistant_content),
-        )
-        conn.execute(
-            "UPDATE sessions SET updated_at = datetime('now','localtime') WHERE id = ?",
-            (session_id,),
-        )
-
-init_db()
-
-@app.get("/health")
-async def health():
-    return {"state":"ok"}
 
 EMPTY_KB_MESSAGE = "知识库中暂未检索到相关内容，请先上传相关文档后再提问。"
 LLM_FALLBACK_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 
+
 def _make_title(question: str) -> str:
     return question.strip()[:20]
 
-def rewrite_query(question: str, history: list) -> str:
-    """根据对话历史，把用户问题改写成自包含的检索问题。无历史时原样返回。"""
-    if not history:
-        return question
 
-    history_text = "\n".join(
-        [f"{msg.role}: {msg.content}" for msg in history]
-    )
-    try:
-        resp = client.chat.completions.create(
-            model=os.getenv("LLM_MODEL"),
-            messages=[
-                {"role": "system", "content": "你是检索查询改写助手。根据对话历史，把用户的新问题改写成独立、完整的检索问题，使其不依赖历史也能直接检索到相关内容。只输出改写后的问题，不要任何解释。"},
-                {"role": "user", "content": f"历史对话：\n{history_text}\n\n新问题：{question}\n\n改写后的问题："}
-            ]
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception:
-        # 改写失败时降级为原始问题，保证主链路不中断
-        return question
+db.init_db()  # 启动时建表（幂等）
+
+
+@app.get("/health")
+async def health():
+    return {"state": "ok"}
+
 
 @app.post("/chat")
 def chat(request: ChatRequest):
     session_id = request.session_id
-    if session_id is not None and get_session(session_id) is None:
+    if session_id is not None and db.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     if session_id is None:
-        session_id = create_session(_make_title(request.question))
+        session_id = db.create_session(_make_title(request.question))
 
     # 数据库是历史唯一数据源；当前问题在本次结束时才落库
     history = [ChatMessage(role=m["role"], content=m["content"])
-               for m in get_messages(session_id)]
+               for m in db.get_messages(session_id)]
 
     def generate():
         answer_parts = []
-        search_query = rewrite_query(request.question, history)
-        docs = vector_store.similarity_search(search_query, k=3)
+        search_query = llm.rewrite_query(request.question, history)
+        docs = llm.vector_store.similarity_search(search_query, k=3)
         if not docs:
             answer_parts.append(EMPTY_KB_MESSAGE)
             yield EMPTY_KB_MESSAGE
@@ -185,7 +71,7 @@ def chat(request: ChatRequest):
             messages.extend([msg.model_dump() for msg in history])
             messages.append({"role": "user", "content": request.question})
             try:
-                stream = client.chat.completions.create(
+                stream = llm.client.chat.completions.create(
                     model=os.getenv("LLM_MODEL"),
                     messages=messages,
                     stream=True
@@ -200,19 +86,21 @@ def chat(request: ChatRequest):
 
         # 放生成器末尾而非 finally：客户端中途断开会抛 GeneratorExit，跳过落库
         if answer_parts:
-            insert_turn(session_id, request.question, "".join(answer_parts))
+            db.insert_turn(session_id, request.question, "".join(answer_parts))
 
     response = StreamingResponse(generate(), media_type="text/plain")
     response.headers["X-Session-Id"] = str(session_id)
     return response
 
+
 @app.get("/sessions")
 def list_sessions_api():
-    return {"sessions": [dict(s) for s in list_sessions()]}
+    return {"sessions": [dict(s) for s in db.list_sessions()]}
+
 
 @app.get("/sessions/{session_id}")
 def get_session_api(session_id: int):
-    session = get_session(session_id)
+    session = db.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {
@@ -220,37 +108,16 @@ def get_session_api(session_id: int):
         "title": session["title"],
         "created_at": session["created_at"],
         "updated_at": session["updated_at"],
-        "messages": [dict(m) for m in get_messages(session_id)],
+        "messages": [dict(m) for m in db.get_messages(session_id)],
     }
+
 
 @app.delete("/sessions/{session_id}")
 def delete_session_api(session_id: int):
-    if not delete_session(session_id):
+    if not db.delete_session(session_id):
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"status": "deleted", "id": session_id}
 
-ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
-
-def is_allowed_extension(filename: str) -> bool:
-    """文件名后缀是否属于支持格式（忽略大小写，兼容 .PDF）。"""
-    return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
-
-def extract_text(filename: str, content: bytes) -> str:
-    """按扩展名把原始字节提取为纯文本；上传与文档预览共用。"""
-    suffix = Path(filename).suffix.lower()
-    if suffix == ".pdf":
-        reader = PdfReader(BytesIO(content))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-    if suffix == ".docx":
-        doc = Document(BytesIO(content))
-        parts = [p.text for p in doc.paragraphs if p.text.strip()]
-        for table in doc.tables:
-            for row in table.rows:
-                cells = [c.text.strip() for c in row.cells]
-                if any(cells):
-                    parts.append(" | ".join(cells))
-        return "\n".join(parts)
-    return content.decode("utf-8")
 
 @app.post("/upload")
 async def upload_doc(file: UploadFile = File(...)):
@@ -259,67 +126,71 @@ async def upload_doc(file: UploadFile = File(...)):
         return {"error": "文件内容为空", "status": "empty"}
 
     filename = os.path.basename(file.filename)
-    if not is_allowed_extension(filename):
-        return {"error": f"不支持的文件格式，仅支持 {'/'.join(sorted(ALLOWED_EXTENSIONS))}", "status": "error"}
+    if not parsers.is_allowed_extension(filename):
+        return {"error": f"不支持的文件格式，仅支持 {'/'.join(sorted(parsers.ALLOWED_EXTENSIONS))}", "status": "error"}
 
     # 先提取文本再落盘：校验先于副作用，坏文件不残留
     try:
-        text = extract_text(filename, content)
+        text = parsers.extract_text(filename, content)
     except (UnicodeDecodeError, PdfReadError, BadZipFile, KeyError):
         return {"error": "程序读取文档失败，请检查文件是否损坏或已加密。", "status": "error"}
 
     if not text.strip():
         return {"error": "未能从文档中提取到文本（图片型 PDF / 扫描件需 OCR，暂不支持）", "status": "error"}
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    file_path = DATA_DIR / filename
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    file_path = config.DATA_DIR / filename
     with open(file_path, "wb") as f:
         f.write(content)
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.split_text(text)
 
     # 先删该文件的旧向量，再加新向量（幂等：同名文件重复上传不叠加）
-    vector_store.delete(where={"source": filename})
-    vector_store.add_texts(
+    llm.vector_store.delete(where={"source": filename})
+    llm.vector_store.add_texts(
         texts=chunks,
         metadatas=[{"source": filename} for _ in chunks]
     )
 
     return {"filename": filename, "chunks": len(chunks), "status": "upload"}
 
+
 @app.get("/documents")
 def list_documents():
-    if not DATA_DIR.exists():
+    if not config.DATA_DIR.exists():
         return {"documents": []}
     # 只暴露上传的文档，避免 conversations.db 等运行时文件被文档管理接口读到/删除
-    return {"documents": [f for f in os.listdir(DATA_DIR) if is_allowed_extension(f)]}
+    return {"documents": [f for f in os.listdir(config.DATA_DIR) if parsers.is_allowed_extension(f)]}
+
 
 @app.get("/documents/{filename}")
 def get_document(filename: str):
-    if not is_allowed_extension(filename):
+    if not parsers.is_allowed_extension(filename):
         raise HTTPException(status_code=404, detail="文件不存在")
-    file_path = DATA_DIR / filename
+    file_path = config.DATA_DIR / filename
     if not file_path.exists():
         return {"error": "文件不存在"}
     try:
         with open(file_path, "rb") as f:
-            text = extract_text(filename, f.read())
+            text = parsers.extract_text(filename, f.read())
     except (UnicodeDecodeError, PdfReadError, BadZipFile, KeyError):
         return {"error": "文档读取失败，请删除后重新上传"}
     return {"filename": filename, "content": text}
 
+
 @app.delete("/documents/{filename}")
 def delete_document(filename: str):
-    if not is_allowed_extension(filename):
+    if not parsers.is_allowed_extension(filename):
         raise HTTPException(status_code=404, detail="文件不存在")
-    file_path = DATA_DIR / filename
+    file_path = config.DATA_DIR / filename
     if file_path.exists():
         file_path.unlink()
 
-    vector_store.delete(where={"source": filename})
+    llm.vector_store.delete(where={"source": filename})
 
     return {"status": "delete", "filename": filename}
+
 
 if __name__ == "__main__":
     uvicorn.run(

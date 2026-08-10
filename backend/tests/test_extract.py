@@ -6,7 +6,7 @@ from zipfile import BadZipFile
 import pytest
 from pypdf.errors import PdfReadError
 
-import main
+import parsers
 
 
 def _make_pdf(text: str) -> bytes:
@@ -47,42 +47,42 @@ def _make_docx() -> bytes:
 
 
 def test_txt_extract():
-    assert main.extract_text("a.txt", "你好 世界".encode("utf-8")) == "你好 世界"
+    assert parsers.extract_text("a.txt", "你好 世界".encode("utf-8")) == "你好 世界"
 
 
 def test_md_extract():
-    assert main.extract_text("guide.md", "# 标题\n正文".encode("utf-8")) == "# 标题\n正文"
+    assert parsers.extract_text("guide.md", "# 标题\n正文".encode("utf-8")) == "# 标题\n正文"
 
 
 def test_uppercase_extension_pdf():
-    assert main.extract_text("A.PDF", _make_pdf("hello")) == "hello"
+    assert parsers.extract_text("A.PDF", _make_pdf("hello")) == "hello"
 
 
 def test_pdf_extract():
-    assert "ZETA-7" in main.extract_text("sample.pdf", _make_pdf("SmartRAG code is ZETA-7"))
+    assert "ZETA-7" in parsers.extract_text("sample.pdf", _make_pdf("SmartRAG code is ZETA-7"))
 
 
 def test_docx_extract_paragraph_and_table():
-    text = main.extract_text("sample.docx", _make_docx())
+    text = parsers.extract_text("sample.docx", _make_docx())
     assert "SmartRAG 支持 Word 文档。" in text
     assert "姓名 | 黄栩晖" in text
 
 
 def test_corrupt_pdf_raises():
     with pytest.raises(PdfReadError):
-        main.extract_text("bad.pdf", b"not a pdf")
+        parsers.extract_text("bad.pdf", b"not a pdf")
 
 
 def test_bad_docx_raises():
     with pytest.raises(BadZipFile):
-        main.extract_text("bad.docx", b"not a zip")
+        parsers.extract_text("bad.docx", b"not a zip")
 
 
 def test_is_allowed_extension():
-    assert main.is_allowed_extension("a.txt")
-    assert main.is_allowed_extension("guide.md")
-    assert main.is_allowed_extension("README.PDF")
-    assert main.is_allowed_extension("resume.docx")
-    assert not main.is_allowed_extension("evil.exe")
-    assert not main.is_allowed_extension("conversations.db")
-    assert not main.is_allowed_extension(".env")
+    assert parsers.is_allowed_extension("a.txt")
+    assert parsers.is_allowed_extension("guide.md")
+    assert parsers.is_allowed_extension("README.PDF")
+    assert parsers.is_allowed_extension("resume.docx")
+    assert not parsers.is_allowed_extension("evil.exe")
+    assert not parsers.is_allowed_extension("conversations.db")
+    assert not parsers.is_allowed_extension(".env")

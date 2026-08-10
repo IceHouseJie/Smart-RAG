@@ -59,24 +59,37 @@ with st.sidebar:
     except requests.exceptions.RequestException:
         st.badge("后端未启动,请联系管理员!", icon=":material/close:", color="red")
 
-    upload_file = st.file_uploader("上传文档", type=["txt", "md", "pdf", "docx"])
-
     if "uploaded_files" not in st.session_state:
         st.session_state.uploaded_files = set()
 
-    if upload_file is not None and upload_file.name not in st.session_state.uploaded_files:
-        files = {"file": (upload_file.name, upload_file.getvalue(), upload_file.type or "text/plain")}
-        try:
-            resp = requests.post(f"{API}/upload", files=files, timeout=30)
-            result = resp.json() if resp.status_code == 200 else {}
-        except requests.exceptions.RequestException:
-            result = {}
-        # 后端错误也是 200 + {"error":...}，必须看 status 字段，否则 result['filename'] 会 KeyError
-        if result.get("status") == "upload":
-            st.session_state.uploaded_files.add(upload_file.name)
-            st.toast(f"上传成功: {result['filename']}({result['chunks']}个片段) ")
+    upload_file = st.file_uploader("上传文档", type=["txt", "md", "pdf", "docx"], key="doc_uploader")
+
+    if upload_file is not None:
+        filename = upload_file.name
+        if filename == st.session_state.get("last_uploaded_name"):
+            # 同一文件还留在上传器里，上一轮已处理过：跳过，避免每轮 rerun 重播
+            pass
         else:
-            st.toast(result.get("error", "无法连接后端服务，请确认后端已启动"))
+            st.session_state.last_uploaded_name = filename
+            if filename in st.session_state.uploaded_files:
+                # 同名文件：不重复上传，只提示
+                st.toast(f"「{filename}」已上传过，请勿重复上传")
+            else:
+                files = {"file": (upload_file.name, upload_file.getvalue(), upload_file.type or "text/plain")}
+                try:
+                    resp = requests.post(f"{API}/upload", files=files, timeout=30)
+                    result = resp.json() if resp.status_code == 200 else {}
+                except requests.exceptions.RequestException:
+                    result = {}
+                # 后端错误也是 200 + {"error":...}，必须看 status 字段，否则 result['filename'] 会 KeyError
+                if result.get("status") == "upload":
+                    st.session_state.uploaded_files.add(filename)
+                    st.toast(f"上传成功: {result['filename']}({result['chunks']}个片段) ")
+                else:
+                    st.toast(result.get("error", "无法连接后端服务，请确认后端已启动"))
+    else:
+        # 上传器被清空（用户点了 X）：重置，下次重选（含同名）会重新判断
+        st.session_state.pop("last_uploaded_name", None)
 
     st.divider()
     st.subheader("已上传的文档")

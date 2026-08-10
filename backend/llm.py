@@ -1,5 +1,6 @@
-"""AI 基础设施：通义千问 client / embedding / 向量库 + 查询改写。"""
+"""AI 基础设施：通义千问 client / embedding / 向量库 + 查询改写 + 视觉提取。"""
 
+import base64
 import os
 from openai import OpenAI
 from langchain_openai import OpenAIEmbeddings
@@ -44,3 +45,23 @@ def rewrite_query(question: str, history: list) -> str:
     except Exception:
         # 改写失败时降级为原始问题，保证主链路不中断
         return question
+
+
+def vision_extract_text(pages: list) -> str:
+    """逐页把图片发给视觉模型，提取文字/关键信息，供扫描件 PDF 使用。"""
+    model = os.getenv("VISION_MODEL", "qwen-vl-plus")
+    parts = []
+    for img in pages:
+        b64 = base64.b64encode(img).decode()
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "这是文档扫描页图片，请提取图中全部文字和关键信息，保持原有结构与顺序，只输出提取内容。"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            }],
+        )
+        parts.append(resp.choices[0].message.content)
+    return "\n".join(parts)

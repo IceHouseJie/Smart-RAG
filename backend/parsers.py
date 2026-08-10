@@ -31,3 +31,15 @@ def extract_text(filename: str, content: bytes) -> str:
                     parts.append(" | ".join(cells))
         return "\n".join(parts)
     return content.decode("utf-8")
+
+
+def render_pdf_pages(content: bytes) -> list:
+    """把 PDF 每页渲染成 PNG 字节，供扫描件走视觉模型识别。"""
+    import pymupdf
+
+    doc = pymupdf.open(stream=content, filetype="pdf")
+    pages = []
+    for page in doc:
+        pix = page.get_pixmap(dpi=200)
+        pages.append(pix.tobytes("png"))
+    return pages

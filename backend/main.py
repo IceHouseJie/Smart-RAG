@@ -2,6 +2,7 @@
 
 import os
 import uvicorn
+from pathlib import Path
 from zipfile import BadZipFile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
@@ -34,6 +35,16 @@ LLM_FALLBACK_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 
 def _make_title(question: str) -> str:
     return question.strip()[:20]
+
+
+def _extract_document_text(filename: str, content: bytes) -> str:
+    """提取文档文本；PDF 无文字层（扫描件）时回退视觉模型。"""
+    text = parsers.extract_text(filename, content)
+    if text.strip():
+        return text
+    if Path(filename).suffix.lower() == ".pdf":
+        return llm.vision_extract_text(parsers.render_pdf_pages(content))
+    return text
 
 
 db.init_db()  # 启动时建表（幂等）
@@ -131,7 +142,7 @@ async def upload_doc(file: UploadFile = File(...)):
 
     # 先提取文本再落盘：校验先于副作用，坏文件不残留
     try:
-        text = parsers.extract_text(filename, content)
+        text = _extract_document_text(filename, content)
     except (UnicodeDecodeError, PdfReadError, BadZipFile, KeyError):
         return {"error": "程序读取文档失败，请检查文件是否损坏或已加密。", "status": "error"}
 
@@ -173,7 +184,7 @@ def get_document(filename: str):
         return {"error": "文件不存在"}
     try:
         with open(file_path, "rb") as f:
-            text = parsers.extract_text(filename, f.read())
+            text = _extract_document_text(filename, f.read())
     except (UnicodeDecodeError, PdfReadError, BadZipFile, KeyError):
         return {"error": "文档读取失败，请删除后重新上传"}
     return {"filename": filename, "content": text}
